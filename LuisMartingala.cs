@@ -1,0 +1,1 @@
+/mnt/c/Users/LUIS/Documents/NinjaTrader 8/bin/Custom/Indicators/LuisMartingala.cs
