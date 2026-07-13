@@ -22,7 +22,7 @@ using NinjaTrader.NinjaScript.DrawingTools;
 #endregion
 
 //This namespace holds Indicators in this folder and is required. Do not change it. 
-namespace NinjaTrader.NinjaScript.Indicators.martingaleindicator
+namespace NinjaTrader.NinjaScript.Indicators.Martingaleindicator
 {
 	public class LuisMartingala : Indicator
 	{
@@ -33,6 +33,7 @@ namespace NinjaTrader.NinjaScript.Indicators.martingaleindicator
 		private System.Windows.Controls.RowDefinition addedRow;
 		private bool								panelActive;
 		private int									chartTraderBaseRowCount;
+		private Position							position;
 
 		private const string						StopLossLineTag = "LuisMartingalaStopLossLine";
 
@@ -47,7 +48,7 @@ namespace NinjaTrader.NinjaScript.Indicators.martingaleindicator
 			{
 				Description									= @"Enter the description for your new custom Indicator here.";
 				Name										= "LuisMartingala";
-				Calculate									= Calculate.OnBarClose;
+				Calculate									= Calculate.OnEachTick;
 				IsOverlay									= true;
 				DisplayInDataBox							= true;
 				DrawOnPricePanel							= true;
@@ -66,8 +67,14 @@ namespace NinjaTrader.NinjaScript.Indicators.martingaleindicator
 			}
 			else if (State == State.DataLoaded)
 			{
-				if (Account != null && Position != null)
-					Position.PositionChanged += OnPositionChanged;
+				foreach (Account a in Account.All)
+				{
+					a.PositionUpdate += OnPositionUpdate;
+
+					Position existing = a.Positions.FirstOrDefault(p => p.Instrument == Instrument && p.MarketPosition != MarketPosition.Flat);
+					if (existing != null)
+						position = existing;
+				}
 			}
 			else if (State == State.Historical)
 			{
@@ -81,8 +88,8 @@ namespace NinjaTrader.NinjaScript.Indicators.martingaleindicator
 			}
 			else if (State == State.Terminated)
 			{
-				if (Position != null)
-					Position.PositionChanged -= OnPositionChanged;
+				foreach (Account a in Account.All)
+					a.PositionUpdate -= OnPositionUpdate;
 
 				if (ChartControl != null)
 				{
@@ -96,39 +103,47 @@ namespace NinjaTrader.NinjaScript.Indicators.martingaleindicator
 
 		protected override void OnBarUpdate()
 		{
-			//Add your custom indicator logic here.
+			if (CurrentBar < 0)
+				return;
+
+			UpdateStopLossLine();
 		}
 
-		private void OnPositionChanged(object sender, EventArgs e)
+		private void OnPositionUpdate(object sender, PositionEventArgs e)
 		{
-			UpdateStopLossLine();
+			if (e.Position.Instrument != Instrument)
+				return;
+
+			position = e.Position;
+
+			if (ChartControl != null)
+				ChartControl.Dispatcher.InvokeAsync(() => UpdateStopLossLine());
+			else
+				UpdateStopLossLine();
 		}
 
 		private void UpdateStopLossLine()
 		{
-			if (Position == null || Position.MarketPosition == MarketPosition.Flat || Position.Quantity == 0)
+			if (position == null || position.MarketPosition == MarketPosition.Flat || position.Quantity == 0)
 			{
-				ChartControl?.Dispatcher.InvokeAsync(() => RemoveDrawObject(StopLossLineTag));
+				RemoveDrawObject(StopLossLineTag);
 				return;
 			}
 
 			double pointValue		= Instrument.MasterInstrument.PointValue;
-			double avgPrice		= Position.AveragePrice;
-			int quantity			= Position.Quantity;
+			double avgPrice		= position.AveragePrice;
+			int quantity			= position.Quantity;
 
 			double riskPerContract	= RiskUsd / quantity;
 			double priceOffset		= riskPerContract / pointValue;
 
-			double stopPrice = Position.MarketPosition == MarketPosition.Long
+			double stopPrice = position.MarketPosition == MarketPosition.Long
 				? avgPrice - priceOffset
 				: avgPrice + priceOffset;
 
 			stopPrice = Instrument.MasterInstrument.RoundToTickSize(stopPrice);
 
-			ChartControl?.Dispatcher.InvokeAsync(() =>
-			{
-				Draw.HorizontalLine(this, StopLossLineTag, stopPrice, Brushes.OrangeRed, DashStyleHelper.Dash, 2);
-			});
+			Draw.HorizontalLine(this, StopLossLineTag, stopPrice, Brushes.OrangeRed, DashStyleHelper.Dash, 2);
 		}
 
 		#region Chart Trader Label
@@ -203,19 +218,19 @@ namespace NinjaTrader.NinjaScript.Indicators
 {
 	public partial class Indicator : NinjaTrader.Gui.NinjaScript.IndicatorRenderBase
 	{
-		private martingaleindicator.LuisMartingala[] cacheLuisMartingala;
-		public martingaleindicator.LuisMartingala LuisMartingala(double riskUsd)
+		private Martingaleindicator.LuisMartingala[] cacheLuisMartingala;
+		public Martingaleindicator.LuisMartingala LuisMartingala(double riskUsd)
 		{
 			return LuisMartingala(Input, riskUsd);
 		}
 
-		public martingaleindicator.LuisMartingala LuisMartingala(ISeries<double> input, double riskUsd)
+		public Martingaleindicator.LuisMartingala LuisMartingala(ISeries<double> input, double riskUsd)
 		{
 			if (cacheLuisMartingala != null)
 				for (int idx = 0; idx < cacheLuisMartingala.Length; idx++)
 					if (cacheLuisMartingala[idx] != null && cacheLuisMartingala[idx].RiskUsd == riskUsd && cacheLuisMartingala[idx].EqualsInput(input))
 						return cacheLuisMartingala[idx];
-			return CacheIndicator<martingaleindicator.LuisMartingala>(new martingaleindicator.LuisMartingala(){ RiskUsd = riskUsd }, input, ref cacheLuisMartingala);
+			return CacheIndicator<Martingaleindicator.LuisMartingala>(new Martingaleindicator.LuisMartingala(){ RiskUsd = riskUsd }, input, ref cacheLuisMartingala);
 		}
 	}
 }
@@ -224,12 +239,12 @@ namespace NinjaTrader.NinjaScript.MarketAnalyzerColumns
 {
 	public partial class MarketAnalyzerColumn : MarketAnalyzerColumnBase
 	{
-		public Indicators.martingaleindicator.LuisMartingala LuisMartingala(double riskUsd)
+		public Indicators.Martingaleindicator.LuisMartingala LuisMartingala(double riskUsd)
 		{
 			return indicator.LuisMartingala(Input, riskUsd);
 		}
 
-		public Indicators.martingaleindicator.LuisMartingala LuisMartingala(ISeries<double> input , double riskUsd)
+		public Indicators.Martingaleindicator.LuisMartingala LuisMartingala(ISeries<double> input , double riskUsd)
 		{
 			return indicator.LuisMartingala(input, riskUsd);
 		}
@@ -240,12 +255,12 @@ namespace NinjaTrader.NinjaScript.Strategies
 {
 	public partial class Strategy : NinjaTrader.Gui.NinjaScript.StrategyRenderBase
 	{
-		public Indicators.martingaleindicator.LuisMartingala LuisMartingala(double riskUsd)
+		public Indicators.Martingaleindicator.LuisMartingala LuisMartingala(double riskUsd)
 		{
 			return indicator.LuisMartingala(Input, riskUsd);
 		}
 
-		public Indicators.martingaleindicator.LuisMartingala LuisMartingala(ISeries<double> input , double riskUsd)
+		public Indicators.Martingaleindicator.LuisMartingala LuisMartingala(ISeries<double> input , double riskUsd)
 		{
 			return indicator.LuisMartingala(input, riskUsd);
 		}
