@@ -34,6 +34,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Martingaleindicator
 		private bool								panelActive;
 		private int									chartTraderBaseRowCount;
 		private Position							position;
+		private double								lastStopPrice = double.NaN;
 
 		private const string						StopLossLineTag = "LuisMartingalaStopLossLine";
 
@@ -127,6 +128,7 @@ namespace NinjaTrader.NinjaScript.Indicators.Martingaleindicator
 			if (position == null || position.MarketPosition == MarketPosition.Flat || position.Quantity == 0)
 			{
 				RemoveDrawObject(StopLossLineTag);
+				lastStopPrice = double.NaN;
 				return;
 			}
 
@@ -143,7 +145,18 @@ namespace NinjaTrader.NinjaScript.Indicators.Martingaleindicator
 
 			stopPrice = Instrument.MasterInstrument.RoundToTickSize(stopPrice);
 
+			if (stopPrice == lastStopPrice)
+				return;
+
+			lastStopPrice = stopPrice;
+
 			Draw.HorizontalLine(this, StopLossLineTag, stopPrice, Brushes.OrangeRed, DashStyleHelper.Dash, 2);
+
+			HorizontalLine lineObj = DrawObjects.FirstOrDefault(o => o.Tag == StopLossLineTag) as HorizontalLine;
+			if (lineObj != null)
+			{
+				lineObj.IsLocked = true;
+			}
 		}
 
 		#region Chart Trader Label
